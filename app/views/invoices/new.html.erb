@@ -1,0 +1,24 @@
+<h1>Upload Invoice or Receipt</h1>
+
+<% if @invoice.errors.any? %>
+  <div style="color: red; margin-bottom: 20px;">
+    <h3><%= pluralize(@invoice.errors.count, "error") %> prevented this invoice from being saved:</h3>
+    <ul>
+      <% @invoice.errors.full_messages.each do |message| %>
+        <li><%= message %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
+
+<%= form_with(model: @invoice, url: invoices_path, local: true) do |form| %>
+  <div style="margin-bottom: 20px;">
+    <%= form.label :image, "Select Invoice/Receipt Image:" %>
+    <br>
+    <%= form.file_field :image, accept: 'image/*', required: true, style: "margin-top: 10px;" %>
+  </div>
+
+  <div>
+    <%= form.submit "Upload Invoice", style: "padding: 10px 20px; font-size: 16px; cursor: pointer;" %>
+  </div>
+<% end %>
