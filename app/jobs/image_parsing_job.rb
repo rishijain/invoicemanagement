@@ -1,3 +1,6 @@
+require 'base64'
+require 'image_processing/mini_magick'
+
 class ImageParsingJob < ApplicationJob
   queue_as :default
   retry_on StandardError, wait: 5.seconds, attempts: 3
@@ -29,18 +32,108 @@ class ImageParsingJob < ApplicationJob
   private
 
   def parse_invoice_with_llm(invoice)
-    # STUB: This will be replaced with actual Anthropic Claude API call
-    # For now, return mock data
-    Rails.logger.info "📸 [STUB] Parsing image for invoice ##{invoice.id}"
+    Rails.logger.info "📸 Parsing invoice image ##{invoice.id} with Claude..."
 
-    {
-      vendor_name: "Sample Vendor",
-      invoice_number: "INV-#{rand(1000..9999)}",
-      date: Date.today.to_s,
-      total_amount: rand(100..1000).round(2),
-      tax_amount: rand(10..100).round(2),
-      currency: "USD",
-      parsed_at: Time.current.to_s
-    }
+    # Initialize Anthropic client
+    client = Anthropic::Client.new(
+      api_key: Rails.application.credentials.anthropic_api_key
+    )
+
+    # Get image data and convert HEIC to JPEG if needed
+    content_type = invoice.image.content_type || "image/jpeg"
+    base64_image = nil
+    media_type = nil
+
+    if content_type =~ /heic|heif/i
+      # Convert HEIC to JPEG
+      Rails.logger.info "  Converting HEIC to JPEG..."
+      invoice.image.open do |file|
+        processed = ImageProcessing::MiniMagick
+          .source(file)
+          .convert("jpeg")
+          .call
+
+        image_data = File.read(processed.path)
+        base64_image = Base64.strict_encode64(image_data)
+      end
+      media_type = "image/jpeg"
+    else
+      # Use image as-is
+      image_data = invoice.image.download
+      base64_image = Base64.strict_encode64(image_data)
+
+      # Determine media type
+      media_type = case content_type
+                   when /jpeg|jpg/i
+                     "image/jpeg"
+                   when /png/i
+                     "image/png"
+                   when /gif/i
+                     "image/gif"
+                   when /webp/i
+                     "image/webp"
+                   else
+                     "image/jpeg"
+                   end
+    end
+
+    # Call Claude API with vision (using Haiku - fast and cost-effective)
+    response = client.messages.create(
+      model: "claude-3-haiku-20240307",
+      max_tokens: 2048,
+      messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: media_type,
+                  data: base64_image
+                }
+              },
+              {
+                type: "text",
+                text: <<~PROMPT
+                  Extract the following information from this invoice or receipt image.
+                  Return ONLY a valid JSON object with these exact fields (use null for missing values):
+
+                  {
+                    "vendor_name": "name of the vendor/merchant",
+                    "invoice_number": "invoice or receipt number",
+                    "date": "date in YYYY-MM-DD format",
+                    "total_amount": numeric value only,
+                    "tax_amount": numeric value only,
+                    "currency": "3-letter currency code like USD, EUR, INR"
+                  }
+
+                  Do not include any explanation, only the JSON object.
+                PROMPT
+              }
+            ]
+          }
+        ]
+    )
+
+    # Extract text from response (response is an Anthropic::Models::Message object)
+    text_content = response.content[0].text
+
+    # Parse JSON response
+    extracted_data = JSON.parse(text_content)
+
+    # Add metadata
+    extracted_data["parsed_at"] = Time.current.to_s
+
+    Rails.logger.info "✅ Successfully parsed invoice ##{invoice.id}"
+
+    extracted_data
+  rescue JSON::ParserError => e
+    Rails.logger.error "Failed to parse JSON response: #{e.message}"
+    Rails.logger.error "Response was: #{text_content}"
+    raise "LLM returned invalid JSON: #{e.message}"
+  rescue StandardError => e
+    Rails.logger.error "Failed to parse invoice: #{e.message}"
+    raise
   end
 end
