@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_01_24_175703) do
+ActiveRecord::Schema[8.1].define(version: 2026_01_24_181445) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -44,6 +44,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_01_24_175703) do
 
   create_table "invoices", force: :cascade do |t|
     t.datetime "created_at", null: false
+    t.string "drive_upload_status", default: "pending"
+    t.text "error_message"
+    t.jsonb "extracted_data", default: {}
+    t.string "google_drive_file_id"
+    t.string "google_drive_url"
+    t.integer "google_sheet_row_number"
+    t.string "parsing_status", default: "pending"
+    t.datetime "processed_at"
+    t.string "sheet_update_status", default: "pending"
     t.string "status"
     t.datetime "updated_at", null: false
   end
