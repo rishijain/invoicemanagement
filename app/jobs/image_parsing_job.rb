@@ -45,12 +45,13 @@ class ImageParsingJob < ApplicationJob
     media_type = nil
 
     if content_type =~ /heic|heif/i
-      # Convert HEIC to JPEG
-      Rails.logger.info "  Converting HEIC to JPEG..."
+      # Convert HEIC to JPEG with compression
+      Rails.logger.info "  Converting HEIC to JPEG with compression..."
       invoice.image.open do |file|
         processed = ImageProcessing::MiniMagick
           .source(file)
           .convert("jpeg")
+          .resize_to_limit(2000, 2000)  # Compress to prevent API timeouts
           .call
 
         image_data = File.read(processed.path)
@@ -58,9 +59,17 @@ class ImageParsingJob < ApplicationJob
       end
       media_type = "image/jpeg"
     else
-      # Use image as-is
-      image_data = invoice.image.download
-      base64_image = Base64.strict_encode64(image_data)
+      # Use image with compression to prevent API timeouts
+      Rails.logger.info "  Compressing image..."
+      invoice.image.open do |file|
+        processed = ImageProcessing::MiniMagick
+          .source(file)
+          .resize_to_limit(2000, 2000)  # Compress large images
+          .call
+
+        image_data = File.read(processed.path)
+        base64_image = Base64.strict_encode64(image_data)
+      end
 
       # Determine media type
       media_type = case content_type
