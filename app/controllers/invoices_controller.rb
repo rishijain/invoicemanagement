@@ -9,7 +9,7 @@ class InvoicesController < ApplicationController
 
     if @invoice.save
       # Enqueue the first job in the processing chain
-      ImageParsingJob.perform_later(@invoice.id)
+      ImageParsingJob.perform_now(@invoice.id)
 
       redirect_to thank_you_invoices_path, notice: 'Invoice uploaded successfully!'
     else
