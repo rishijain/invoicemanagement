@@ -29,7 +29,7 @@ class DriveUploadJob < ApplicationJob
     invoice.mark_drive_upload_complete!(drive_url, file_id)
 
     # Enqueue next job in the chain
-    SheetUpdateJob.perform_later(invoice.id)
+    SheetUpdateJob.perform_now(invoice.id)
 
   rescue StandardError => e
     invoice.mark_step_failed!('drive_upload', e.message)

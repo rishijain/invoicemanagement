@@ -55,9 +55,10 @@ class Invoice < ApplicationRecord
     )
   end
 
-  def mark_sheet_update_complete!(row_number)
+  def mark_sheet_update_complete!(row_number, sheet_url)
     update!(
       google_sheet_row_number: row_number,
+      google_sheet_url: sheet_url,
       sheet_update_status: 'completed',
       status: 'completed',
       processed_at: Time.current

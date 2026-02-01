@@ -2,17 +2,20 @@ require 'googleauth'
 require 'googleauth/stores/file_token_store'
 
 namespace :google do
-  desc "Authorize Google Drive OAuth access"
+  desc "Authorize Google Drive and Sheets OAuth access"
   task authorize: :environment do
     OOB_URI = 'urn:ietf:wg:oauth:2.0:oob'
-    SCOPE = 'https://www.googleapis.com/auth/drive.file'
+    SCOPES = [
+      'https://www.googleapis.com/auth/drive.file',
+      'https://www.googleapis.com/auth/spreadsheets'
+    ]
 
     client_id = Rails.application.credentials.google_oauth[:client_id]
     client_secret = Rails.application.credentials.google_oauth[:client_secret]
 
     authorizer = Google::Auth::UserAuthorizer.new(
       Google::Auth::ClientId.new(client_id, client_secret),
-      SCOPE,
+      SCOPES,
       Google::Auth::Stores::FileTokenStore.new(file: Rails.root.join('tmp', 'google_tokens.yaml'))
     )
 
@@ -60,6 +63,45 @@ namespace :google do
     end
   end
 
+  desc "Setup Google Sheet headers"
+  task setup_sheet: :environment do
+    require 'google/apis/sheets_v4'
+
+    puts "\n📊 Setting up Google Sheet headers..."
+
+    begin
+      service = Google::Apis::SheetsV4::SheetsService.new
+      service.authorization = get_google_credentials
+
+      sheet_id = Rails.application.credentials.google_sheet_id
+
+      # Prepare header row
+      headers = [
+        ['Date', 'Vendor', 'Invoice Number', 'Total Amount', 'Tax Amount', 'Currency', 'Drive Link', 'Processed At']
+      ]
+
+      range = 'Sheet1!A1:H1'
+      value_range = Google::Apis::SheetsV4::ValueRange.new(values: headers)
+
+      service.update_spreadsheet_value(
+        sheet_id,
+        range,
+        value_range,
+        value_input_option: 'RAW'
+      )
+
+      puts "✅ Headers added to Google Sheet!"
+      puts "Columns: Date | Vendor | Invoice Number | Amount | Tax | Currency | Drive Link | Processed At"
+      puts ""
+      puts "View your sheet: https://docs.google.com/spreadsheets/d/#{sheet_id}"
+    rescue => e
+      puts "❌ Error: #{e.message}"
+      puts "\nMake sure you:"
+      puts "1. Enabled Google Sheets API"
+      puts "2. Re-authorized with: bin/rails google:authorize"
+    end
+  end
+
   desc "Test Google Drive connection"
   task test: :environment do
     require 'google/apis/drive_v3'
@@ -96,7 +138,10 @@ namespace :google do
 
     authorizer = Google::Auth::UserAuthorizer.new(
       Google::Auth::ClientId.new(client_id, client_secret),
-      'https://www.googleapis.com/auth/drive.file',
+      [
+        'https://www.googleapis.com/auth/drive.file',
+        'https://www.googleapis.com/auth/spreadsheets'
+      ],
       Google::Auth::Stores::FileTokenStore.new(file: Rails.root.join('tmp', 'google_tokens.yaml'))
     )
 
