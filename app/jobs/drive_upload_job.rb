@@ -1,3 +1,7 @@
+require 'google/apis/drive_v3'
+require 'googleauth'
+require 'googleauth/stores/file_token_store'
+
 class DriveUploadJob < ApplicationJob
   queue_as :default
   retry_on StandardError, wait: 5.seconds, attempts: 3
@@ -35,13 +39,60 @@ class DriveUploadJob < ApplicationJob
   private
 
   def upload_to_google_drive(invoice)
-    # STUB: This will be replaced with actual Google Drive API call
-    # For now, return mock data
-    Rails.logger.info "☁️ [STUB] Uploading image to Google Drive for invoice ##{invoice.id}"
+    Rails.logger.info "☁️ Uploading image to Google Drive for invoice ##{invoice.id}"
 
-    file_id = "drive_file_#{SecureRandom.hex(8)}"
-    drive_url = "https://drive.google.com/file/d/#{file_id}/view"
+    # Initialize Google Drive service
+    service = Google::Apis::DriveV3::DriveService.new
+    service.authorization = get_google_credentials
 
-    [drive_url, file_id]
+    # Prepare file metadata
+    folder_id = Rails.application.credentials.google_drive_folder_id
+    vendor_name = invoice.extracted_data['vendor_name'] || 'Unknown'
+    date = invoice.extracted_data['date'] || Time.current.strftime('%Y-%m-%d')
+
+    # Create filename: "YYYY-MM-DD - Vendor Name - Invoice ID.jpg"
+    filename = "#{date} - #{vendor_name} - Invoice #{invoice.id}.jpg"
+
+    file_metadata = {
+      name: filename,
+      parents: [folder_id]
+    }
+
+    # Upload the file
+    invoice.image.open do |file|
+      uploaded_file = service.create_file(
+        file_metadata,
+        fields: 'id, webViewLink, webContentLink',
+        upload_source: file.path,
+        content_type: invoice.image.content_type
+      )
+
+      file_id = uploaded_file.id
+      # Use webViewLink for private access (requires Google account)
+      drive_url = uploaded_file.web_view_link
+
+      Rails.logger.info "✅ Uploaded to Google Drive: #{filename}"
+
+      [drive_url, file_id]
+    end
+  end
+
+  def get_google_credentials
+    client_id = Rails.application.credentials.google_oauth[:client_id]
+    client_secret = Rails.application.credentials.google_oauth[:client_secret]
+
+    authorizer = Google::Auth::UserAuthorizer.new(
+      Google::Auth::ClientId.new(client_id, client_secret),
+      'https://www.googleapis.com/auth/drive.file',
+      Google::Auth::Stores::FileTokenStore.new(file: Rails.root.join('tmp', 'google_tokens.yaml'))
+    )
+
+    credentials = authorizer.get_credentials('default')
+
+    if credentials.nil?
+      raise "No Google OAuth credentials found. Run: bin/rails google:authorize"
+    end
+
+    credentials
   end
 end

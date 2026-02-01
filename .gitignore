@@ -33,3 +33,12 @@
 # Ignore key files for decrypting credentials and more.
 /config/*.key
 
+# Ignore Google OAuth credentials (contains sensitive client secrets)
+/invoicemanager-oauth.json
+
+# Ignore Google tokens
+/tmp/google_tokens.yaml
+
+# Ignore vim swap files
+*.swp
+

@@ -1,0 +1,55 @@
+#!/usr/bin/env ruby
+require_relative '../config/environment'
+require 'json'
+
+# Read OAuth credentials from the JSON file
+oauth_file = Rails.root.join('invoicemanager-oauth.json')
+
+unless File.exist?(oauth_file)
+  puts "❌ Error: invoicemanager-oauth.json not found"
+  puts "Please download the Desktop app credentials and save as invoicemanager-oauth.json"
+  exit 1
+end
+
+oauth_json = File.read(oauth_file)
+oauth_data = JSON.parse(oauth_json)
+
+# Check if it's the right type
+if oauth_data.key?('web')
+  puts "❌ Error: This is a 'Web application' credential"
+  puts "Please create a 'Desktop app' credential instead"
+  exit 1
+end
+
+unless oauth_data.key?('installed')
+  puts "❌ Error: Invalid OAuth credential format"
+  puts "Expected 'installed' key for Desktop app"
+  exit 1
+end
+
+# Extract credentials
+client_id = oauth_data['installed']['client_id']
+client_secret = oauth_data['installed']['client_secret']
+project_id = oauth_data['installed']['project_id']
+
+puts "✅ Valid Desktop app credentials found"
+puts "Client ID: #{client_id[0..30]}..."
+
+# Prepare new credentials content
+content = <<~YAML
+  secret_key_base: #{Rails.application.credentials.secret_key_base}
+  anthropic_api_key: #{Rails.application.credentials.anthropic_api_key}
+  google_oauth:
+    client_id: #{client_id}
+    client_secret: #{client_secret}
+    project_id: #{project_id}
+YAML
+
+# Write to temp file and update credentials
+File.write('/tmp/creds_update.yml', content)
+system("cat /tmp/creds_update.yml | EDITOR='tee' bin/rails credentials:edit > /dev/null 2>&1")
+File.delete('/tmp/creds_update.yml')
+
+puts "✅ Rails credentials updated"
+puts ""
+puts "Next step: Run 'bin/rails google:authorize' to complete OAuth setup"

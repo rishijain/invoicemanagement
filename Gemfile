@@ -23,6 +23,10 @@ gem "solid_cable"
 # Anthropic Claude API client
 gem "anthropic"
 
+# Google Drive API client
+gem "google-apis-drive_v3"
+gem "googleauth"
+
 # Image processing for format conversion (HEIC to JPEG)
 gem "image_processing", "~> 1.2"
 gem "mini_magick"

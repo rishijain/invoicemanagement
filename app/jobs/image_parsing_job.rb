@@ -22,7 +22,7 @@ class ImageParsingJob < ApplicationJob
     invoice.mark_parsing_complete!(extracted_data)
 
     # Enqueue next job in the chain
-    DriveUploadJob.perform_later(invoice.id)
+    DriveUploadJob.perform_now(invoice.id)
 
   rescue StandardError => e
     invoice.mark_step_failed!('parsing', e.message)
