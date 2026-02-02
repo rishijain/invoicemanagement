@@ -49,17 +49,18 @@ class SheetUpdateJob < ApplicationJob
     data = invoice.extracted_data
     row = [
       data['date'] || '',
-      data['vendor_name'] || '',
-      data['invoice_number'] || '',
-      data['total_amount'] || '',
-      data['tax_amount'] || '',
-      data['currency'] || '',
-      invoice.google_drive_url || '',
-      Time.current.strftime('%Y-%m-%d %H:%M:%S')
+      data['particulars'] || '',
+      data['type'] || '',
+      data['classification'] || '',
+      data['description'] || '',
+      data['amount_inr'] || '',
+      data['amount_usd'] || '',
+      data['mode_of_transaction'] || '',
+      invoice.google_drive_url || ''
     ]
 
     # Append to sheet (appends to first empty row)
-    range = 'Sheet1!A:H'  # Adjust sheet name if needed
+    range = 'Sheet1!A:I'  # 9 columns: date, particulars, type, classification, description, amount_inr, amount_usd, mode_of_transaction, receipt_url
     value_range = Google::Apis::SheetsV4::ValueRange.new(values: [row])
 
     result = service.append_spreadsheet_value(
@@ -76,8 +77,9 @@ class SheetUpdateJob < ApplicationJob
     sheet_url = "https://docs.google.com/spreadsheets/d/#{sheet_id}/edit#gid=0&range=A#{row_number}"
 
     Rails.logger.info "✅ Appended to Google Sheet row #{row_number}"
-    Rails.logger.info "   Vendor: #{data['vendor_name']}"
-    Rails.logger.info "   Amount: #{data['total_amount']}"
+    Rails.logger.info "   Particulars: #{data['particulars']}"
+    Rails.logger.info "   Classification: #{data['classification']}"
+    Rails.logger.info "   Amount (INR): #{data['amount_inr']}, Amount (USD): #{data['amount_usd']}"
     Rails.logger.info "   Sheet URL: #{sheet_url}"
 
     [row_number, sheet_url]

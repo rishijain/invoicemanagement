@@ -105,16 +105,21 @@ class ImageParsingJob < ApplicationJob
               {
                 type: "text",
                 text: <<~PROMPT
-                  Extract the following information from this invoice or receipt image.
+                  Carefully analyze this invoice or receipt image and extract the following information.
+
+                  IMPORTANT for date extraction:
+                  - Look for the INVOICE DATE or BILL DATE (not expiry date, order date, or validity date)
+                  - This is typically labeled as "Date:", "Invoice Date:", "Bill Date:", or similar
+                  - It represents when the transaction occurred
+
                   Return ONLY a valid JSON object with these exact fields (use null for missing values):
 
                   {
-                    "vendor_name": "name of the vendor/merchant",
-                    "invoice_number": "invoice or receipt number",
-                    "date": "date in YYYY-MM-DD format",
-                    "total_amount": numeric value only,
-                    "tax_amount": numeric value only,
-                    "currency": "3-letter currency code like USD, EUR, INR"
+                    "particulars": "name of the company/restaurant/vendor",
+                    "date": "the invoice/bill date in YYYY-MM-DD format",
+                    "total_amount": numeric value only (the final amount to be paid),
+                    "currency": "3-letter currency code like USD, EUR, INR",
+                    "invoice_type": "classify as either 'restaurant' (for food/dining bills) or 'travel' (for transportation, hotels, flights) or 'other'"
                   }
 
                   Do not include any explanation, only the JSON object.
@@ -131,10 +136,55 @@ class ImageParsingJob < ApplicationJob
     # Parse JSON response
     extracted_data = JSON.parse(text_content)
 
+    # Convert date to D-MMM-YYYY format (e.g., 1-Apr-2025)
+    if extracted_data["date"].present?
+      begin
+        parsed_date = Date.parse(extracted_data["date"])
+        extracted_data["date"] = parsed_date.strftime("%-d-%b-%Y")
+      rescue Date::Error => e
+        Rails.logger.warn "Could not parse date: #{extracted_data['date']}"
+        # Keep original date if parsing fails
+      end
+    end
+
+    # Set amount in the correct currency field
+    currency = extracted_data["currency"]&.upcase
+    total_amount = extracted_data["total_amount"]
+
+    if currency == "INR"
+      extracted_data["amount_inr"] = total_amount
+      extracted_data["amount_usd"] = nil
+    elsif currency == "USD"
+      extracted_data["amount_usd"] = total_amount
+      extracted_data["amount_inr"] = nil
+    else
+      # For other currencies, default to INR field
+      extracted_data["amount_inr"] = total_amount
+      extracted_data["amount_usd"] = nil
+    end
+
+    # Apply business rules
+    extracted_data["type"] = "debit"
+    extracted_data["mode_of_transaction"] = "rishi paid for it"
+
+    # Set classification and description based on invoice type
+    case extracted_data["invoice_type"]
+    when "restaurant"
+      extracted_data["classification"] = "office"
+      extracted_data["description"] = "meeting with client"
+    when "travel"
+      extracted_data["classification"] = "travel"
+      extracted_data["description"] = "travel for meeting"
+    else
+      extracted_data["classification"] = "other"
+      extracted_data["description"] = nil
+    end
+
     # Add metadata
     extracted_data["parsed_at"] = Time.current.to_s
 
     Rails.logger.info "✅ Successfully parsed invoice ##{invoice.id}"
+    Rails.logger.info "   Classification: #{extracted_data['classification']}, Type: #{extracted_data['type']}"
 
     extracted_data
   rescue JSON::ParserError => e
