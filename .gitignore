@@ -42,3 +42,4 @@
 # Ignore vim swap files
 *.swp
 
+.env

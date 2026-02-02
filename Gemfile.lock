@@ -112,6 +112,9 @@ GEM
       reline (>= 0.3.8)
     declarative (0.0.20)
     dotenv (3.2.0)
+    dotenv-rails (3.2.0)
+      dotenv (= 3.2.0)
+      railties (>= 6.1)
     drb (2.2.3)
     ed25519 (1.4.0)
     erb (6.0.1)
@@ -445,6 +448,7 @@ DEPENDENCIES
   bundler-audit
   capybara
   debug
+  dotenv-rails
   google-apis-drive_v3
   google-apis-sheets_v4
   googleauth

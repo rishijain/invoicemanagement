@@ -43,7 +43,7 @@ class SheetUpdateJob < ApplicationJob
     service = Google::Apis::SheetsV4::SheetsService.new
     service.authorization = get_google_credentials
 
-    sheet_id = Rails.application.credentials.google_sheet_id
+    sheet_id = ENV['GOOGLE_SHEET_ID'] || Rails.application.credentials.google_sheet_id
 
     # Prepare row data from extracted invoice data
     data = invoice.extracted_data
@@ -86,8 +86,8 @@ class SheetUpdateJob < ApplicationJob
   end
 
   def get_google_credentials
-    client_id = Rails.application.credentials.google_oauth[:client_id]
-    client_secret = Rails.application.credentials.google_oauth[:client_secret]
+    client_id = ENV['GOOGLE_OAUTH_CLIENT_ID'] || Rails.application.credentials.dig(:google_oauth, :client_id)
+    client_secret = ENV['GOOGLE_OAUTH_CLIENT_SECRET'] || Rails.application.credentials.dig(:google_oauth, :client_secret)
 
     authorizer = Google::Auth::UserAuthorizer.new(
       Google::Auth::ClientId.new(client_id, client_secret),

@@ -36,7 +36,7 @@ class ImageParsingJob < ApplicationJob
 
     # Initialize Anthropic client
     client = Anthropic::Client.new(
-      api_key: Rails.application.credentials.anthropic_api_key
+      api_key: ENV['ANTHROPIC_API_KEY'] || Rails.application.credentials.anthropic_api_key
     )
 
     # Get image data and convert HEIC to JPEG if needed

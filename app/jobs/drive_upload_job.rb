@@ -46,8 +46,8 @@ class DriveUploadJob < ApplicationJob
     service.authorization = get_google_credentials
 
     # Prepare file metadata
-    folder_id = Rails.application.credentials.google_drive_folder_id
-    vendor_name = invoice.extracted_data['vendor_name'] || 'Unknown'
+    folder_id = ENV['GOOGLE_DRIVE_FOLDER_ID'] || Rails.application.credentials.google_drive_folder_id
+    vendor_name = invoice.extracted_data['particulars'] || 'Unknown'
     date = invoice.extracted_data['date'] || Time.current.strftime('%Y-%m-%d')
 
     # Create filename: "YYYY-MM-DD - Vendor Name - Invoice ID.jpg"
@@ -78,8 +78,8 @@ class DriveUploadJob < ApplicationJob
   end
 
   def get_google_credentials
-    client_id = Rails.application.credentials.google_oauth[:client_id]
-    client_secret = Rails.application.credentials.google_oauth[:client_secret]
+    client_id = ENV['GOOGLE_OAUTH_CLIENT_ID'] || Rails.application.credentials.dig(:google_oauth, :client_id)
+    client_secret = ENV['GOOGLE_OAUTH_CLIENT_SECRET'] || Rails.application.credentials.dig(:google_oauth, :client_secret)
 
     authorizer = Google::Auth::UserAuthorizer.new(
       Google::Auth::ClientId.new(client_id, client_secret),
