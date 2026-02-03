@@ -1,0 +1,339 @@
+# Production Server Quick Reference Commands
+
+## Service Management
+
+### Start Services
+sudo systemctl start puma                      # Start Rails app
+sudo systemctl start solid-queue               # Start background jobs
+sudo systemctl start puma solid-queue          # Start both
+
+### Stop Services
+sudo systemctl stop puma
+sudo systemctl stop solid-queue
+sudo systemctl stop puma solid-queue           # Stop both
+
+### Restart Services
+sudo systemctl restart puma
+sudo systemctl restart solid-queue
+sudo systemctl restart puma solid-queue        # Restart both
+
+### Check Status
+sudo systemctl status puma
+sudo systemctl status solid-queue
+sudo systemctl status puma solid-queue         # Check both
+
+### Enable/Disable Auto-Start on Boot
+sudo systemctl enable puma solid-queue         # Auto-start on reboot
+sudo systemctl disable puma solid-queue        # Don't auto-start
+
+================================================================================
+
+## Kill Processes
+
+### Kill Specific Services
+sudo systemctl stop puma solid-queue
+
+# Or force kill
+sudo pkill -9 puma
+sudo pkill -9 ruby
+
+### Kill by Port
+# Find what's using port 3000
+sudo lsof -i :3000
+sudo ss -tlnp | grep :3000
+
+# Kill by PID
+sudo kill -9 <PID>
+
+================================================================================
+
+## View Logs
+
+### Real-time Logs (Follow)
+
+# Rails app logs
+sudo journalctl -u puma -f
+tail -f ~/projects/invoicemanagement/log/production.log
+
+# Background jobs
+sudo journalctl -u solid-queue -f
+
+# Both services
+sudo journalctl -u puma -u solid-queue -f
+
+# All logs together
+tail -f /var/log/puma.log /var/log/solid_queue.log ~/projects/invoicemanagement/log/production.log
+
+### Recent Logs
+
+# Last 50 lines
+sudo journalctl -u puma -n 50
+tail -50 ~/projects/invoicemanagement/log/production.log
+
+# Last 10 minutes
+sudo journalctl -u puma --since "10 minutes ago"
+
+# Search for errors
+sudo journalctl -u puma | grep -i error
+grep -i error ~/projects/invoicemanagement/log/production.log | tail -20
+
+### Log Files Location
+/var/log/puma.log                                      # Puma stdout
+/var/log/puma_error.log                                # Puma errors
+/var/log/solid_queue.log                               # Jobs stdout
+/var/log/solid_queue_error.log                         # Jobs errors
+~/projects/invoicemanagement/log/production.log        # Rails app log (most detailed)
+
+================================================================================
+
+## Deploy Updates
+
+cd ~/projects/invoicemanagement
+
+# Pull latest code
+git pull origin main
+
+# Install dependencies (if Gemfile changed)
+bundle install
+
+# Run migrations (if any)
+RAILS_ENV=production rails db:migrate
+
+# Precompile assets (if views/CSS/JS changed)
+RAILS_ENV=production rails assets:precompile
+
+# Restart services
+sudo systemctl restart puma solid-queue
+
+# Check status
+sudo systemctl status puma solid-queue
+
+================================================================================
+
+## Rails Console
+
+cd ~/projects/invoicemanagement
+RAILS_ENV=production rails console
+
+# Useful commands in console:
+Invoice.count
+Invoice.last
+Invoice.last.extracted_data
+SolidQueue::Job.count
+SolidQueue::Job.last
+ActiveStorage::Blob.count
+exit
+
+================================================================================
+
+## Check App Status
+
+# Check if port 3000 is listening
+sudo ss -tlnp | grep :3000
+
+# Test locally
+curl http://localhost:3000
+
+# Check from browser
+# http://YOUR_SERVER_IP:3000
+
+# Check running processes
+ps aux | grep puma
+ps aux | grep ruby
+
+# Get server IP
+curl ifconfig.me
+
+================================================================================
+
+## Quick Troubleshooting
+
+### Full restart
+sudo systemctl stop puma solid-queue
+sudo pkill -9 ruby
+sleep 2
+sudo systemctl start puma solid-queue
+sudo systemctl status puma solid-queue
+
+### Check for port conflicts
+sudo ss -tlnp | grep :3000
+
+### View recent errors
+sudo journalctl -u puma --since "5 minutes ago" | grep -i error
+tail -50 ~/projects/invoicemanagement/log/production.log | grep -i error
+
+### Check disk space
+df -h
+
+### Check memory usage
+free -h
+
+### Check if services are enabled
+systemctl is-enabled puma
+systemctl is-enabled solid-queue
+
+================================================================================
+
+## Most Common One-Liners
+
+### Deploy updates (all in one)
+cd ~/projects/invoicemanagement && git pull && bundle install && RAILS_ENV=production rails db:migrate assets:precompile && sudo systemctl restart puma solid-queue
+
+### View live logs
+tail -f ~/projects/invoicemanagement/log/production.log
+
+### Restart everything
+sudo systemctl restart puma solid-queue
+
+### Check status
+sudo systemctl status puma solid-queue
+
+### Check what's running
+ps aux | grep -E "puma|solid_queue" | grep -v grep
+
+================================================================================
+
+## Database Commands
+
+### PostgreSQL Console
+sudo -u postgres psql
+
+# In psql:
+\l                                    # List databases
+\c invoicemanager_production          # Connect to database
+\dt                                   # List tables
+\q                                    # Quit
+
+### Database Backup
+pg_dump -U root invoicemanager_production > backup_$(date +%Y%m%d).sql
+
+### Database Restore
+psql -U root invoicemanager_production < backup_20260203.sql
+
+================================================================================
+
+## File Permissions
+
+### Fix storage permissions
+cd ~/projects/invoicemanagement
+chmod -R 755 storage
+chmod 600 .env
+
+### Fix ownership
+chown -R root:root ~/projects/invoicemanagement
+
+================================================================================
+
+## Google OAuth Token
+
+### Copy token from local to server
+# On local machine:
+scp tmp/google_tokens.yaml root@YOUR_SERVER_IP:/root/projects/invoicemanagement/tmp/
+
+# On server:
+chmod 600 /root/projects/invoicemanagement/tmp/google_tokens.yaml
+
+### Test Google connection
+cd ~/projects/invoicemanagement
+RAILS_ENV=production rails runner "
+require 'googleauth'
+require 'googleauth/stores/file_token_store'
+client_id = ENV['GOOGLE_OAUTH_CLIENT_ID']
+client_secret = ENV['GOOGLE_OAUTH_CLIENT_SECRET']
+authorizer = Google::Auth::UserAuthorizer.new(
+  Google::Auth::ClientId.new(client_id, client_secret),
+  ['https://www.googleapis.com/auth/drive.file', 'https://www.googleapis.com/auth/spreadsheets'],
+  Google::Auth::Stores::FileTokenStore.new(file: Rails.root.join('tmp', 'google_tokens.yaml'))
+)
+credentials = authorizer.get_credentials('default')
+puts credentials ? '✅ Connected!' : '❌ Failed!'
+"
+
+================================================================================
+
+## Firewall Management (ufw)
+
+### Check firewall status
+sudo ufw status
+
+### Allow port 3000
+sudo ufw allow 3000
+
+### Allow HTTP/HTTPS (if using Nginx later)
+sudo ufw allow 80
+sudo ufw allow 443
+
+### Enable firewall
+sudo ufw enable
+
+================================================================================
+
+## System Monitoring
+
+### Check system resources
+top                     # Interactive process viewer (press q to quit)
+htop                    # Better version (if installed)
+
+### Check disk usage
+df -h                   # Disk space
+du -sh ~/projects/invoicemanagement  # App size
+
+### Check memory
+free -h
+
+### Check CPU
+mpstat 1 5              # CPU stats for 5 seconds
+
+### Check network
+netstat -tulpn          # All listening ports
+ss -tulpn               # Same as above (newer)
+
+================================================================================
+
+## Emergency Commands
+
+### App is down - full reset
+sudo systemctl stop puma solid-queue
+sudo pkill -9 ruby
+cd ~/projects/invoicemanagement
+git pull
+bundle install
+RAILS_ENV=production rails db:migrate
+sudo systemctl start puma solid-queue
+sudo systemctl status puma solid-queue
+
+### Port 3000 stuck
+sudo lsof -i :3000
+sudo kill -9 <PID>
+
+### Disk full
+df -h
+du -sh ~/projects/invoicemanagement/log/*
+# Clean old logs if needed
+> ~/projects/invoicemanagement/log/production.log
+
+### Memory issues
+free -h
+sudo systemctl restart puma solid-queue
+
+================================================================================
+
+## Useful URLs
+
+Application: http://YOUR_SERVER_IP:3000
+Upload Form: http://YOUR_SERVER_IP:3000
+Google Cloud Console: https://console.cloud.google.com
+GitHub Repo: https://github.com/YOUR_USERNAME/invoicemanager
+
+================================================================================
+
+## Notes
+
+- Always check logs first when debugging: tail -f log/production.log
+- Restart services after code changes: sudo systemctl restart puma solid-queue
+- Services auto-start on server reboot (if enabled)
+- Keep .env file secure (chmod 600)
+- Regular backups of database and .env file
+- Monitor disk space and logs regularly
+
+================================================================================
