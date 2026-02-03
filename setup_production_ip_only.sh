@@ -57,20 +57,31 @@ echo ""
 echo "Step 3: Creating directories..."
 mkdir -p tmp/pids tmp/sockets log
 
+# Set up PostgreSQL user
+echo ""
+echo "Step 4: Setting up PostgreSQL user..."
+if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='root'" | grep -q 1; then
+    echo "✅ PostgreSQL user 'root' already exists"
+else
+    echo "Creating PostgreSQL user 'root'..."
+    sudo -u postgres createuser -s root
+    echo "✅ PostgreSQL user 'root' created"
+fi
+
 # Set up database
 echo ""
-echo "Step 4: Setting up database..."
+echo "Step 5: Setting up database..."
 RAILS_ENV=production bundle exec rails db:create
 RAILS_ENV=production bundle exec rails db:migrate
 
 # Precompile assets
 echo ""
-echo "Step 5: Precompiling assets..."
+echo "Step 6: Precompiling assets..."
 RAILS_ENV=production bundle exec rails assets:precompile
 
 # Update Puma configuration for production
 echo ""
-echo "Step 6: Configuring Puma..."
+echo "Step 7: Configuring Puma..."
 cat > config/puma.rb <<'PUMA_EOF'
 # Puma configuration for production
 
@@ -94,7 +105,7 @@ PUMA_EOF
 
 # Create Puma systemd service
 echo ""
-echo "Step 7: Creating Puma systemd service..."
+echo "Step 8: Creating Puma systemd service..."
 sudo tee /etc/systemd/system/puma.service > /dev/null <<EOF
 [Unit]
 Description=Puma HTTP Server for Invoice Manager
@@ -122,7 +133,7 @@ EOF
 
 # Create Solid Queue systemd service
 echo ""
-echo "Step 8: Creating Solid Queue systemd service..."
+echo "Step 9: Creating Solid Queue systemd service..."
 sudo tee /etc/systemd/system/solid-queue.service > /dev/null <<EOF
 [Unit]
 Description=Solid Queue Background Jobs for Invoice Manager
@@ -149,12 +160,12 @@ EOF
 
 # Set proper permissions
 echo ""
-echo "Step 9: Setting permissions..."
+echo "Step 10: Setting permissions..."
 chmod 600 .env
 
 # Enable and start services
 echo ""
-echo "Step 10: Starting services..."
+echo "Step 11: Starting services..."
 sudo systemctl daemon-reload
 sudo systemctl enable puma solid-queue
 sudo systemctl start puma
@@ -172,7 +183,7 @@ sudo systemctl status solid-queue --no-pager | head -20
 
 # Open firewall port
 echo ""
-echo "Step 11: Opening firewall port..."
+echo "Step 12: Opening firewall port..."
 sudo ufw allow 3000 2>/dev/null || echo "Note: ufw not active or not installed"
 
 # Get server IP
