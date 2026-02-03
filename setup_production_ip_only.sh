@@ -77,7 +77,7 @@ RAILS_ENV=production bundle exec rails db:migrate
 # Precompile assets
 echo ""
 echo "Step 6: Precompiling assets..."
-RAILS_ENV=production bundle exec rails assets:precompile
+# RAILS_ENV=production bundle exec rails assets:precompile
 
 # Update Puma configuration for production
 echo ""

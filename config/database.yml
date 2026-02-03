@@ -71,8 +71,6 @@ production:
   primary: &primary_production
     <<: *default
     database: invoicemanager_production
-    username: invoicemanager
-    password: <%= ENV["INVOICEMANAGER_DATABASE_PASSWORD"] %>
   cache:
     <<: *primary_production
     database: invoicemanager_production_cache
