@@ -18,6 +18,14 @@
     <%= form.file_field :image, accept: 'image/*', required: true, style: "margin-top: 10px;" %>
   </div>
 
+  <div style="margin-bottom: 20px;">
+    <%= form.label :manual_date, "Invoice Date (optional):" %>
+    <br>
+    <small style="color: #666;">Leave blank to let AI extract the date from the image</small>
+    <br>
+    <%= form.date_field :manual_date, style: "margin-top: 10px; padding: 8px; font-size: 14px;" %>
+  </div>
+
   <div>
     <%= form.submit "Upload Invoice", style: "padding: 10px 20px; font-size: 16px; cursor: pointer;" %>
   </div>

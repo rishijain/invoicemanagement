@@ -136,11 +136,16 @@ class ImageParsingJob < ApplicationJob
     # Parse JSON response
     extracted_data = JSON.parse(text_content)
 
-    # Convert date to D-MMM-YYYY format (e.g., 1-Apr-2025)
-    if extracted_data["date"].present?
+    # Use manual date if provided, otherwise use LLM-extracted date
+    if invoice.manual_date.present?
+      extracted_data["date"] = invoice.manual_date.strftime("%-d-%b-%Y")
+      Rails.logger.info "   Using manual date: #{extracted_data['date']}"
+    elsif extracted_data["date"].present?
+      # Convert LLM-extracted date to D-MMM-YYYY format (e.g., 1-Apr-2025)
       begin
         parsed_date = Date.parse(extracted_data["date"])
         extracted_data["date"] = parsed_date.strftime("%-d-%b-%Y")
+        Rails.logger.info "   Using LLM-extracted date: #{extracted_data['date']}"
       rescue Date::Error => e
         Rails.logger.warn "Could not parse date: #{extracted_data['date']}"
         # Keep original date if parsing fails

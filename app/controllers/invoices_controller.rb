@@ -23,6 +23,6 @@ class InvoicesController < ApplicationController
   private
 
   def invoice_params
-    params.require(:invoice).permit(:image)
+    params.require(:invoice).permit(:image, :manual_date)
   end
 end
