@@ -88,21 +88,25 @@ class SheetUpdateJob < ApplicationJob
   def get_google_credentials
     client_id = ENV['GOOGLE_OAUTH_CLIENT_ID'] || Rails.application.credentials.dig(:google_oauth, :client_id)
     client_secret = ENV['GOOGLE_OAUTH_CLIENT_SECRET'] || Rails.application.credentials.dig(:google_oauth, :client_secret)
+    refresh_token = Rails.application.credentials.dig(:google_oauth, :refresh_token)
 
-    authorizer = Google::Auth::UserAuthorizer.new(
-      Google::Auth::ClientId.new(client_id, client_secret),
-      [
+    if refresh_token.nil?
+      raise "No Google OAuth refresh token found. Run: bin/rails google:authorize"
+    end
+
+    # Create credentials directly from refresh token (no token file needed)
+    credentials = Google::Auth::UserRefreshCredentials.new(
+      client_id: client_id,
+      client_secret: client_secret,
+      scope: [
         'https://www.googleapis.com/auth/drive.file',
         'https://www.googleapis.com/auth/spreadsheets'
       ],
-      Google::Auth::Stores::FileTokenStore.new(file: Rails.root.join('tmp', 'google_tokens.yaml'))
+      refresh_token: refresh_token
     )
 
-    credentials = authorizer.get_credentials('default')
-
-    if credentials.nil?
-      raise "No Google OAuth credentials found. Run: bin/rails google:authorize"
-    end
+    # Fetch access token (will use refresh token automatically)
+    credentials.fetch_access_token!
 
     credentials
   end

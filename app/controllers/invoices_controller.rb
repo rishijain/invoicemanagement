@@ -9,7 +9,7 @@ class InvoicesController < ApplicationController
 
     if @invoice.save
       # Enqueue the first job in the processing chain (delayed by 15 seconds)
-      ImageParsingJob.set(wait: 15.seconds).perform_later(@invoice.id)
+      ImageParsingJob.set(wait: 2.seconds).perform_later(@invoice.id)
 
       redirect_to thank_you_invoices_path, notice: 'Invoice uploaded successfully!'
     else
