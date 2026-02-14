@@ -12,9 +12,9 @@ class SheetUpdateJob < ApplicationJob
     # Skip if already completed (idempotent)
     return if invoice.sheet_update_completed?
 
-    # Ensure previous steps are complete
-    unless invoice.parsing_completed? && invoice.drive_upload_completed?
-      Rails.logger.warn "⚠️ Previous steps not complete for invoice ##{invoice.id}, skipping sheet update"
+    # Ensure Drive upload is complete
+    unless invoice.drive_upload_completed?
+      Rails.logger.warn "⚠️ Drive upload not complete for invoice ##{invoice.id}, skipping sheet update"
       return
     end
 

@@ -1,0 +1,90 @@
+<h1>Review Invoice Data</h1>
+
+<% if notice %>
+  <div style="background-color: #d4edda; color: #155724; padding: 15px; margin-bottom: 20px; border-radius: 4px;">
+    <%= notice %>
+  </div>
+<% end %>
+
+<div style="margin-bottom: 30px;">
+  <h2>Extracted Data</h2>
+  <p style="color: #666; margin-bottom: 20px;">Review and correct the information below, then click Save to upload to Google Drive and Sheets.</p>
+
+    <%= form_with(model: @invoice, url: invoice_path(@invoice), method: :patch, local: true) do |form| %>
+      <div style="margin-bottom: 20px;">
+        <%= form.label "invoice[extracted_data][date]", "Date:" %>
+        <br>
+        <%= text_field_tag "invoice[extracted_data][date]", @invoice.extracted_data['date'], style: "width: 100%; padding: 8px; margin-top: 5px; font-size: 14px;" %>
+        <small style="color: #666;">Format: DD-MMM-YYYY (e.g., 1-Apr-2025)</small>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <%= form.label "invoice[extracted_data][particulars]", "Particulars (Vendor/Merchant):" %>
+        <br>
+        <%= text_field_tag "invoice[extracted_data][particulars]", @invoice.extracted_data['particulars'], style: "width: 100%; padding: 8px; margin-top: 5px; font-size: 14px;" %>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <%= form.label "invoice[extracted_data][type]", "Type:" %>
+        <br>
+        <%= select_tag "invoice[extracted_data][type]",
+            options_for_select(
+              ['Business Expense', 'Personal', 'Reimbursement', 'Other'],
+              @invoice.extracted_data['type']
+            ),
+            style: "width: 100%; padding: 8px; margin-top: 5px; font-size: 14px;" %>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <%= form.label "invoice[extracted_data][classification]", "Classification:" %>
+        <br>
+        <%= text_field_tag "invoice[extracted_data][classification]", @invoice.extracted_data['classification'], style: "width: 100%; padding: 8px; margin-top: 5px; font-size: 14px;" %>
+        <small style="color: #666;">e.g., Travel, Office Supplies, Meals, etc.</small>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <%= form.label "invoice[extracted_data][description]", "Description:" %>
+        <br>
+        <%= text_area_tag "invoice[extracted_data][description]", @invoice.extracted_data['description'], style: "width: 100%; padding: 8px; margin-top: 5px; font-size: 14px; min-height: 60px;" %>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <%= form.label "invoice[extracted_data][amount_inr]", "Amount (INR):" %>
+        <br>
+        <%= number_field_tag "invoice[extracted_data][amount_inr]", @invoice.extracted_data['amount_inr'], step: 0.01, style: "width: 100%; padding: 8px; margin-top: 5px; font-size: 14px;" %>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <%= form.label "invoice[extracted_data][amount_usd]", "Amount (USD):" %>
+        <br>
+        <%= number_field_tag "invoice[extracted_data][amount_usd]", @invoice.extracted_data['amount_usd'], step: 0.01, style: "width: 100%; padding: 8px; margin-top: 5px; font-size: 14px;" %>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <%= form.label "invoice[extracted_data][mode_of_transaction]", "Mode of Transaction:" %>
+        <br>
+        <%= select_tag "invoice[extracted_data][mode_of_transaction]",
+            options_for_select(
+              ['rishi paid for it', 'rupali paid for it', 'paid via company account'],
+              @invoice.extracted_data['mode_of_transaction']
+            ),
+            style: "width: 100%; padding: 8px; margin-top: 5px; font-size: 14px;" %>
+      </div>
+
+      <div style="margin-top: 30px; display: flex; gap: 10px;">
+        <%= form.submit "Save & Upload to Google Drive/Sheets", style: "padding: 12px 24px; font-size: 16px; cursor: pointer; background-color: #28a745; color: white; border: none; border-radius: 4px;" %>
+        <%= link_to "Upload Another Invoice", new_invoice_path, style: "padding: 12px 24px; font-size: 16px; text-decoration: none; background-color: #6c757d; color: white; border-radius: 4px; display: inline-block;" %>
+      </div>
+    <% end %>
+
+    <% if @invoice.google_drive_url.present? %>
+      <div style="margin-top: 20px; padding: 15px; background-color: #d1ecf1; border-radius: 4px;">
+        <strong>Status:</strong> Uploaded to Google Drive and Sheets ✅
+        <br>
+        <a href="<%= @invoice.google_drive_url %>" target="_blank" style="color: #0056b3;">View on Google Drive</a>
+        <% if @invoice.google_sheet_url.present? %>
+          | <a href="<%= @invoice.google_sheet_url %>" target="_blank" style="color: #0056b3;">View in Google Sheets</a>
+        <% end %>
+      </div>
+    <% end %>
+</div>

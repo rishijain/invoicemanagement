@@ -1,5 +1,5 @@
 Rails.application.routes.draw do
-  resources :invoices, only: [:new, :create] do
+  resources :invoices, only: [:new, :create, :show, :update] do
     collection do
       get :thank_you
     end

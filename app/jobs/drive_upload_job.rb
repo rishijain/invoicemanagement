@@ -12,24 +12,17 @@ class DriveUploadJob < ApplicationJob
     # Skip if already completed (idempotent)
     return if invoice.drive_upload_completed?
 
-    # Ensure parsing is complete before uploading
-    unless invoice.parsing_completed?
-      Rails.logger.warn "⚠️ Parsing not complete for invoice ##{invoice.id}, skipping upload"
-      return
-    end
-
     # Update status to processing
     invoice.update!(drive_upload_status: 'processing')
 
-    # TODO: Replace with actual Google Drive API call
-    # For now, use stub
+    # Upload to Google Drive
     drive_url, file_id = upload_to_google_drive(invoice)
 
     # Mark upload complete and save URL/file_id
     invoice.mark_drive_upload_complete!(drive_url, file_id)
 
     # Enqueue next job in the chain
-    SheetUpdateJob.perform_now(invoice.id)
+    SheetUpdateJob.perform_later(invoice.id)
 
   rescue StandardError => e
     invoice.mark_step_failed!('drive_upload', e.message)

@@ -1,38 +1,13 @@
 require 'base64'
 require 'image_processing/mini_magick'
 
-class ImageParsingJob < ApplicationJob
-  queue_as :default
-  retry_on StandardError, wait: 5.seconds, attempts: 3
-
-  def perform(invoice_id)
-    invoice = Invoice.find(invoice_id)
-
-    # Skip if already completed (idempotent)
-    return if invoice.parsing_completed?
-
-    # Update status to processing
-    invoice.update!(status: 'processing', parsing_status: 'processing')
-
-    # TODO: Replace with actual LLM API call
-    # For now, use stub data
-    extracted_data = parse_invoice_with_llm(invoice)
-
-    # Mark parsing complete and save extracted data
-    invoice.mark_parsing_complete!(extracted_data)
-
-    # Enqueue next job in the chain
-    DriveUploadJob.perform_now(invoice.id)
-
-  rescue StandardError => e
-    invoice.mark_step_failed!('parsing', e.message)
-    raise # Re-raise to trigger retry
+class InvoiceParser
+  def initialize(invoice)
+    @invoice = invoice
   end
 
-  private
-
-  def parse_invoice_with_llm(invoice)
-    Rails.logger.info "📸 Parsing invoice image ##{invoice.id} with Claude..."
+  def parse
+    Rails.logger.info "📸 Parsing invoice image ##{@invoice.id} with Claude..."
 
     # Initialize Anthropic client
     client = Anthropic::Client.new(
@@ -40,14 +15,14 @@ class ImageParsingJob < ApplicationJob
     )
 
     # Get image data and convert HEIC to JPEG if needed
-    content_type = invoice.image.content_type || "image/jpeg"
+    content_type = @invoice.image.content_type || "image/jpeg"
     base64_image = nil
     media_type = nil
 
     if content_type =~ /heic|heif/i
       # Convert HEIC to JPEG with compression
       Rails.logger.info "  Converting HEIC to JPEG with compression..."
-      invoice.image.open do |file|
+      @invoice.image.open do |file|
         processed = ImageProcessing::MiniMagick
           .source(file)
           .convert("jpeg")
@@ -61,7 +36,7 @@ class ImageParsingJob < ApplicationJob
     else
       # Use image with compression to prevent API timeouts
       Rails.logger.info "  Compressing image..."
-      invoice.image.open do |file|
+      @invoice.image.open do |file|
         processed = ImageProcessing::MiniMagick
           .source(file)
           .resize_to_limit(2000, 2000)  # Compress large images
@@ -136,12 +111,8 @@ class ImageParsingJob < ApplicationJob
     # Parse JSON response
     extracted_data = JSON.parse(text_content)
 
-    # Use manual date if provided, otherwise use LLM-extracted date
-    if invoice.manual_date.present?
-      extracted_data["date"] = invoice.manual_date.strftime("%-d-%b-%Y")
-      Rails.logger.info "   Using manual date: #{extracted_data['date']}"
-    elsif extracted_data["date"].present?
-      # Convert LLM-extracted date to D-MMM-YYYY format (e.g., 1-Apr-2025)
+    # Convert LLM-extracted date to D-MMM-YYYY format (e.g., 1-Apr-2025)
+    if extracted_data["date"].present?
       begin
         parsed_date = Date.parse(extracted_data["date"])
         extracted_data["date"] = parsed_date.strftime("%-d-%b-%Y")
@@ -188,7 +159,7 @@ class ImageParsingJob < ApplicationJob
     # Add metadata
     extracted_data["parsed_at"] = Time.current.to_s
 
-    Rails.logger.info "✅ Successfully parsed invoice ##{invoice.id}"
+    Rails.logger.info "✅ Successfully parsed invoice ##{@invoice.id}"
     Rails.logger.info "   Classification: #{extracted_data['classification']}, Type: #{extracted_data['type']}"
 
     extracted_data

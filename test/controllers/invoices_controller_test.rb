@@ -4,6 +4,18 @@ class InvoicesControllerTest < ActionDispatch::IntegrationTest
   setup do
     # Clean up any existing invoices to ensure test isolation
     Invoice.destroy_all
+
+    # Stub the InvoiceParser to avoid calling Anthropic API in tests
+    InvoiceParser.any_instance.stubs(:parse).returns({
+      "date" => "1-Jan-2025",
+      "particulars" => "Test Vendor",
+      "type" => "Business Expense",
+      "classification" => "Office Supplies",
+      "description" => "Test description",
+      "amount_inr" => "1000",
+      "amount_usd" => "12",
+      "mode_of_transaction" => "Credit Card"
+    })
   end
 
   # Test GET #new
@@ -13,10 +25,8 @@ class InvoicesControllerTest < ActionDispatch::IntegrationTest
     assert_select "form[action=?]", invoices_path
   end
 
-
   # Test POST #create with valid parameters
-  test "should create invoice with valid image" do
-    # Create a test file upload
+  test "should create invoice with valid image and parse immediately" do
     file = fixture_file_upload('test_invoice.png', 'image/png')
 
     assert_difference('Invoice.count', 1) do
@@ -25,19 +35,10 @@ class InvoicesControllerTest < ActionDispatch::IntegrationTest
 
     invoice = Invoice.last
     assert invoice.image.attached?, "Image should be attached"
-    assert_equal 'pending', invoice.status
-    assert_redirected_to thank_you_invoices_path
-    assert_equal 'Invoice uploaded successfully!', flash[:notice]
-  end
-
-  test "should enqueue ImageParsingJob when invoice is created" do
-    file = fixture_file_upload('test_invoice.png', 'image/png')
-
-    assert_enqueued_with(job: ImageParsingJob) do
-      post invoices_url, params: { invoice: { image: file } }
-    end
-    invoice = Invoice.last
-    assert_not_nil invoice
+    assert_equal 'processing', invoice.status
+    assert_equal 'completed', invoice.parsing_status
+    assert_not_empty invoice.extracted_data
+    assert_redirected_to invoice_path(invoice)
   end
 
   # Test POST #create with invalid parameters
@@ -49,55 +50,52 @@ class InvoicesControllerTest < ActionDispatch::IntegrationTest
     assert_response :unprocessable_entity
   end
 
-  test "should not enqueue job when invoice creation fails" do
-    assert_no_enqueued_jobs(only: ImageParsingJob) do
-      post invoices_url, params: { invoice: { image: nil } }
+  # Test GET #show
+  test "should show invoice with extracted data" do
+    invoice = Invoice.create!(
+      image: fixture_file_upload('test_invoice.png', 'image/png'),
+      status: 'processing',
+      parsing_status: 'completed',
+      extracted_data: {
+        "date" => "1-Jan-2025",
+        "particulars" => "Test Vendor"
+      }
+    )
+
+    get invoice_url(invoice)
+    assert_response :success
+    assert_select "input[value=?]", "Test Vendor"
+  end
+
+  # Test PATCH #update
+  test "should update invoice and enqueue background jobs" do
+    invoice = Invoice.create!(
+      image: fixture_file_upload('test_invoice.png', 'image/png'),
+      status: 'processing',
+      parsing_status: 'completed',
+      extracted_data: { "particulars" => "Old Vendor" }
+    )
+
+    assert_enqueued_with(job: DriveUploadJob) do
+      patch invoice_url(invoice), params: {
+        invoice: {
+          extracted_data: {
+            date: "2-Feb-2025",
+            particulars: "Updated Vendor",
+            type: "Business Expense"
+          }
+        }
+      }
     end
+
+    invoice.reload
+    assert_equal "Updated Vendor", invoice.extracted_data["particulars"]
+    assert_redirected_to invoice_path(invoice)
   end
 
-  test "should render errors when image is missing" do
-    post invoices_url, params: { invoice: { image: nil } }
-
-    assert_response :unprocessable_entity
-    # Verify the invoice wasn't created due to validation failure
-    assert_equal 0, Invoice.count
-  end
-
-  # Test GET #thank_you
+  # Test GET #thank_you (legacy page)
   test "should get thank you page" do
     get thank_you_invoices_url
     assert_response :success
-  end
-
-  # Integration tests
-  test "complete upload flow creates invoice and enqueues job" do
-    file = fixture_file_upload('test_invoice.png', 'image/png')
-
-    # Should create invoice
-    assert_difference('Invoice.count', 1) do
-      # Should enqueue job
-      assert_enqueued_with(job: ImageParsingJob) do
-        post invoices_url, params: { invoice: { image: file } }
-      end
-    end
-
-    # Should redirect to thank you page
-    assert_redirected_to thank_you_invoices_path
-    follow_redirect!
-    assert_response :success
-  end
-
-  test "created invoice should have correct initial status values" do
-    file = fixture_file_upload('test_invoice.png', 'image/png')
-    post invoices_url, params: { invoice: { image: file } }
-
-    invoice = Invoice.last
-    assert_equal 'pending', invoice.status
-    assert_equal 'pending', invoice.parsing_status
-    assert_equal 'pending', invoice.drive_upload_status
-    assert_equal 'pending', invoice.sheet_update_status
-    assert_nil invoice.error_message
-    assert_nil invoice.processed_at
-    assert_equal({}, invoice.extracted_data)
   end
 end
