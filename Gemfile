@@ -43,6 +43,7 @@ gem "thruster", require: false
 
 # Load environment variables from .env file (in all environments including production)
 gem "dotenv-rails"
+gem "webrick"
 
 group :development, :test do
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem

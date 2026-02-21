@@ -1,5 +1,19 @@
 # Invoice Manager - Technical Documentation
 
+**Last Updated:** February 2026
+**Status:** ✅ Fully Functional in Production
+
+## ⚠️ Important Notes for Developers
+
+1. **Parsing is SYNCHRONOUS** - No ImageParsingJob! Parsing happens in the controller via `InvoiceParser` service
+2. **User reviews data BEFORE upload** - Show page displays editable form, background jobs run ONLY after user clicks Save
+3. **OAuth not Service Account** - Uses Google OAuth2 with refresh token (authorize locally, copy to production)
+4. **No manual_date field** - Was removed, AI extracts all dates
+5. **Business rules are hardcoded** - type="debit", mode_of_transaction defaults, classification based on invoice_type
+6. **Force push recovery** - Use `git reset --hard origin/main` if divergent branches after force push
+
+---
+
 ## Project Overview
 
 A Rails 8 application that automatically processes invoice and receipt images using AI and cloud services.
@@ -11,52 +25,108 @@ A Rails 8 application that automatically processes invoice and receipt images us
 - Solid Queue (background jobs)
 - Active Storage (file uploads)
 - Anthropic Claude API (AI/LLM)
-- Google Drive API (file storage) - *in progress*
-- Google Sheets API (data storage) - *in progress*
+- Google Drive API (file storage) - ✅ IMPLEMENTED
+- Google Sheets API (data storage) - ✅ IMPLEMENTED
 
 **Purpose:**
-Users upload invoice/receipt images via web form → AI extracts data → Uploads to Google Drive → Appends to Google Sheet
+Users upload invoice/receipt images via web form → AI extracts data immediately → User reviews/edits data → Uploads to Google Drive → Appends to Google Sheet
+
+---
+
+## Quick Start (Development)
+
+```bash
+# Start Rails server
+bin/rails server
+
+# Start background workers (separate terminal)
+bin/jobs
+
+# Visit http://localhost:3000
+# Upload an invoice → Review extracted data → Save → Jobs process in background
+```
+
+## Key Concepts
+
+### Synchronous vs Asynchronous Processing
+
+**Parsing (SYNCHRONOUS):**
+- Happens immediately when user uploads
+- Uses `InvoiceParser` service in controller
+- User sees results right away on show page
+- Can edit any extracted field before saving
+
+**Upload to Drive/Sheets (ASYNCHRONOUS):**
+- Happens ONLY after user confirms data
+- Uses background jobs: `DriveUploadJob` → `SheetUpdateJob`
+- Runs in Solid Queue workers
+- User can close browser after clicking Save
+
+### Business Rules (Auto-Applied)
+
+The system automatically applies these rules during parsing:
+
+1. **Type**: Always set to "debit"
+2. **Mode of Transaction**: Default "rishi paid for it" (user can change to "rupali paid for it" or "paid via company account")
+3. **Classification & Description**: Based on invoice type
+   - Restaurant → "office" + "meeting with client"
+   - Travel → "travel" + "travel for meeting"
+   - Other → "other" + null
+4. **Currency Handling**: Splits amount into INR or USD based on detected currency
 
 ---
 
 ## Architecture
 
-### Job Processing Pipeline
+### Processing Pipeline (Current)
 
 ```
-User Upload (web form)
+1. User Upload (web form)
     ↓
-Invoice saved to database
-Active Storage stores image file
+2. Invoice saved to database + Active Storage stores image
     ↓
-ImageParsingJob enqueued
+3. InvoiceParser Service (SYNCHRONOUS - in controller)
+   ┌─────────────────────────────────┐
+   │ InvoiceParser.parse             │
+   │ - Converts HEIC → JPEG if needed│
+   │ - Compresses image (2000x2000)  │
+   │ - Sends to Claude API           │
+   │ - Extracts: date, particulars,  │
+   │   type, classification,         │
+   │   description, amounts, etc.    │
+   │ - Applies business rules        │
+   │ - Updates invoice.extracted_data│
+   │ - Status: parsing → completed   │
+   └─────────────────────────────────┘
     ↓
-┌─────────────────────────────────┐
-│ ImageParsingJob                 │
-│ - Converts HEIC → JPEG if needed│
-│ - Sends to Claude API           │
-│ - Extracts: vendor, invoice #,  │
-│   date, amount, tax, currency   │
-│ - Updates invoice.extracted_data│
-│ - Status: parsing → completed   │
-└─────────────────────────────────┘
+4. Redirect to Show Page (invoice/:id)
+   - User reviews extracted data
+   - User can edit any field
+   - User clicks "Save & Upload"
+    ↓
+5. Background Jobs (triggered after user confirms)
+   ┌─────────────────────────────────┐
+   │ DriveUploadJob                  │
+   │ - Uploads image to Google Drive │
+   │ - Gets shareable URL            │
+   │ - Saves URL to invoice          │
+   │ - Status: drive_upload → done   │
+   └─────────────────────────────────┘
     ↓ (enqueues next job)
-┌─────────────────────────────────┐
-│ DriveUploadJob                  │
-│ - Uploads image to Google Drive │
-│ - Gets shareable URL            │
-│ - Saves URL to invoice          │
-│ - Status: drive_upload → done   │
-└─────────────────────────────────┘
-    ↓ (enqueues next job)
-┌─────────────────────────────────┐
-│ SheetUpdateJob                  │
-│ - Appends row to Google Sheet   │
-│ - Includes extracted data + URL │
-│ - Status: sheet_update → done   │
-│ - Overall status → completed    │
-└─────────────────────────────────┘
+   ┌─────────────────────────────────┐
+   │ SheetUpdateJob                  │
+   │ - Appends row to Google Sheet   │
+   │ - Includes extracted data + URL │
+   │ - Status: sheet_update → done   │
+   │ - Overall status → completed    │
+   └─────────────────────────────────┘
 ```
+
+**Key Changes from Original Design:**
+- ✅ Parsing is now SYNCHRONOUS (happens in controller, not background job)
+- ✅ User can review and correct data before it goes to Google Drive/Sheets
+- ✅ Better UX - immediate feedback, no waiting for background jobs
+- ✅ Background jobs only run AFTER user confirms the data
 
 ---
 
@@ -75,7 +145,21 @@ create_table :invoices do |t|
 
   # Extracted data from LLM
   t.jsonb :extracted_data, default: {}
-  # Example: {vendor_name, invoice_number, date, total_amount, tax_amount, currency}
+  # Example structure:
+  # {
+  #   "date": "7-Feb-2025",
+  #   "particulars": "Starbucks",
+  #   "type": "debit",
+  #   "classification": "office",
+  #   "description": "meeting with client",
+  #   "amount_inr": "500",
+  #   "amount_usd": null,
+  #   "mode_of_transaction": "rishi paid for it",
+  #   "currency": "INR",
+  #   "invoice_type": "restaurant",
+  #   "total_amount": 500,
+  #   "parsed_at": "2025-02-07 12:34:56 UTC"
+  # }
 
   # Google Drive results
   t.string :google_drive_url
@@ -83,6 +167,7 @@ create_table :invoices do |t|
 
   # Google Sheets results
   t.integer :google_sheet_row_number
+  t.string :google_sheet_url
 
   # Error tracking
   t.text :error_message
@@ -95,6 +180,11 @@ end
 **Active Storage Attachment:**
 - `invoice.image` - The uploaded invoice/receipt image (JPEG, PNG, HEIC, etc.)
 
+**Notes:**
+- ❌ `manual_date` field was removed (no longer needed)
+- ✅ All data is extracted by AI, then user can edit on show page
+- ✅ Business rules automatically set: type, mode_of_transaction, classification, description
+
 ---
 
 ## File Structure
@@ -102,20 +192,22 @@ end
 ```
 app/
 ├── controllers/
-│   └── invoices_controller.rb    # Handles upload form and create
+│   └── invoices_controller.rb    # Handles upload, show, update actions
+├── services/
+│   └── invoice_parser.rb         # AI parsing service (synchronous)
 ├── jobs/
-│   ├── image_parsing_job.rb      # LLM parsing (IMPLEMENTED)
-│   ├── drive_upload_job.rb       # Google Drive upload (STUB)
-│   └── sheet_update_job.rb       # Google Sheets append (STUB)
+│   ├── drive_upload_job.rb       # Google Drive upload (IMPLEMENTED)
+│   └── sheet_update_job.rb       # Google Sheets append (IMPLEMENTED)
 ├── models/
 │   └── invoice.rb                # Invoice model with status enums
 └── views/
     └── invoices/
         ├── new.html.erb          # Upload form
-        └── thank_you.html.erb    # Success page
+        ├── show.html.erb         # Review/edit extracted data
+        └── thank_you.html.erb    # Legacy success page (not used)
 
 config/
-├── credentials.yml.enc           # Encrypted: anthropic_api_key
+├── credentials.yml.enc           # Encrypted: anthropic_api_key, google_oauth
 ├── database.yml                  # PostgreSQL + Solid Queue config
 ├── storage.yml                   # Active Storage config
 └── routes.rb                     # Root: invoices#new
@@ -123,7 +215,26 @@ config/
 db/
 ├── schema.rb                     # Main database schema
 └── queue_schema.rb               # Solid Queue tables
+
+deploy.sh                         # Deployment script for production
 ```
+
+**Key Files:**
+
+- **`app/services/invoice_parser.rb`** - Core AI parsing logic (replaces ImageParsingJob)
+  - HEIC conversion, image compression
+  - Claude API integration
+  - Business rules application
+
+- **`app/controllers/invoices_controller.rb`** - Main controller with:
+  - `new` - Upload form
+  - `create` - Saves invoice + runs parsing synchronously
+  - `show` - Display extracted data with editable form
+  - `update` - Save corrections + trigger background jobs
+
+- **`app/views/invoices/show.html.erb`** - Review page with editable fields
+
+- **`deploy.sh`** - Production deployment script
 
 ---
 
@@ -170,24 +281,52 @@ bin/jobs                      # Terminal 2: Solid Queue worker
 # Edit encrypted credentials
 EDITOR="nano" bin/rails credentials:edit
 
-# Add this line:
+# Add:
 anthropic_api_key: sk-ant-api03-YOUR-KEY-HERE
 ```
 
-**2. Google Service Account (TODO):**
-- Create Google Cloud Project
-- Enable Google Drive API & Google Sheets API
-- Create Service Account
-- Download JSON credentials
-- Store in: `config/google_credentials.json` (add to .gitignore)
+**2. Google OAuth Setup (Required):**
 
-**3. Google Drive & Sheets IDs (TODO):**
+Create OAuth credentials in Google Cloud Console:
+1. Go to Google Cloud Console → APIs & Services → Credentials
+2. Create OAuth 2.0 Client ID (Application type: Web application)
+3. Add redirect URI: `urn:ietf:wg:oauth:2.0:oob`
+4. Enable Google Drive API and Google Sheets API
+
+Run authorization locally:
 ```bash
-# Add to credentials:
+bin/rails google:authorize
+```
+
+This will:
+- Open browser for authorization
+- Save refresh token to Rails credentials automatically
+
+**3. Add Google IDs to credentials:**
+```bash
+EDITOR="nano" bin/rails credentials:edit
+
+# Add full structure:
+google_oauth:
+  client_id: YOUR_CLIENT_ID.apps.googleusercontent.com
+  client_secret: YOUR_CLIENT_SECRET
+  project_id: YOUR_PROJECT_ID
+  refresh_token: YOUR_REFRESH_TOKEN  # Auto-saved by google:authorize
 google_drive_folder_id: YOUR_FOLDER_ID
 google_sheet_id: YOUR_SHEET_ID
-google_sheet_tab_name: Sheet1
 ```
+
+**4. Copy credentials to production:**
+
+After running `bin/rails google:authorize` locally, copy the entire `google_oauth` section (including refresh_token) to production credentials:
+
+```bash
+# On production server
+EDITOR="nano" bin/rails credentials:edit --environment production
+# Paste the google_oauth section
+```
+
+**Important:** The refresh token works indefinitely, so you only need to authorize once locally and copy to production.
 
 ---
 
@@ -200,102 +339,140 @@ google_sheet_tab_name: Sheet1
 - Good accuracy for structured document parsing
 - Supports vision (image input)
 
-**Prompt Strategy:**
-- Request JSON-only output (no explanation)
-- Specify exact field names
-- Handle null values for missing data
-
-**Image Processing:**
-- Accepts: JPEG, PNG, GIF, WebP
-- Auto-converts HEIC (iPhone photos) to JPEG
+**Image Processing (InvoiceParser service):**
+- Auto-converts HEIC to JPEG using ImageProcessing::MiniMagick
+- Compresses images to 2000x2000 to prevent API timeouts
 - Base64 encodes images for API transmission
+- Accepts: JPEG, PNG, GIF, WebP, HEIC
+
+**Prompt Strategy:**
+- Extracts: particulars, date, total_amount, currency, invoice_type
+- Focuses on INVOICE DATE (not expiry/order date)
+- Returns JSON-only output (no explanation)
+- Classifies invoice as: restaurant, travel, or other
+
+**Business Rules (Applied Automatically):**
+```ruby
+# Fixed values
+extracted_data["type"] = "debit"
+extracted_data["mode_of_transaction"] = "rishi paid for it"
+
+# Currency-based amount splitting
+if currency == "INR"
+  extracted_data["amount_inr"] = total_amount
+  extracted_data["amount_usd"] = nil
+elsif currency == "USD"
+  extracted_data["amount_usd"] = total_amount
+  extracted_data["amount_inr"] = nil
+
+# Invoice type-based classification
+if invoice_type == "restaurant"
+  extracted_data["classification"] = "office"
+  extracted_data["description"] = "meeting with client"
+elsif invoice_type == "travel"
+  extracted_data["classification"] = "travel"
+  extracted_data["description"] = "travel for meeting"
+else
+  extracted_data["classification"] = "other"
+  extracted_data["description"] = nil
+```
+
+**User-Editable Fields (on show page):**
+- Date, Particulars, Type, Classification, Description
+- Amount (INR), Amount (USD)
+- Mode of Transaction (dropdown: "rishi paid for it", "rupali paid for it", "paid via company account")
 
 **Error Handling:**
-- 3 retry attempts with 5-second delay
+- Errors shown immediately to user (synchronous)
 - Saves error messages to `invoice.error_message`
-- Marks `parsing_status` as 'failed'
+- Redirects back to upload form with error message
 
-### Google Drive API (TODO)
+### Google Drive API ✅ IMPLEMENTED
 
-**Implementation Plan:**
+**Implementation (DriveUploadJob):**
+- Uses OAuth2 User Refresh Token (stored in Rails credentials)
+- No `tmp/google_tokens.yaml` file needed
+- Uploads to specific folder (configured in credentials)
+- Filename format: `"YYYY-MM-DD - Vendor Name - Invoice ID.jpg"`
+- Returns `web_view_link` for accessing file
+
+**Authentication:**
 ```ruby
-# In DriveUploadJob
-require 'google/apis/drive_v3'
-
-def upload_to_google_drive(invoice)
-  service = Google::Apis::DriveV3::DriveService.new
-  service.authorization = get_credentials
-
-  invoice.image.open do |file|
-    metadata = { name: invoice.image.filename.to_s }
-    file_object = service.create_file(
-      metadata,
-      fields: 'id, webViewLink',
-      upload_source: file.path,
-      content_type: 'image/jpeg'
-    )
-
-    # Make publicly viewable
-    permission = { type: 'anyone', role: 'reader' }
-    service.create_permission(file_object.id, permission)
-
-    [file_object.web_view_link, file_object.id]
-  end
-end
+credentials = Google::Auth::UserRefreshCredentials.new(
+  client_id: Rails.application.credentials.dig(:google_oauth, :client_id),
+  client_secret: Rails.application.credentials.dig(:google_oauth, :client_secret),
+  scope: ['https://www.googleapis.com/auth/drive.file'],
+  refresh_token: Rails.application.credentials.dig(:google_oauth, :refresh_token)
+)
 ```
 
-### Google Sheets API (TODO)
+### Google Sheets API ✅ IMPLEMENTED
 
-**Implementation Plan:**
+**Implementation (SheetUpdateJob):**
+
+**Column Structure (9 columns):**
+1. Date (e.g., "7-Feb-2025")
+2. Particulars (vendor name)
+3. Type (always "debit")
+4. Classification (office, travel, other)
+5. Description
+6. Amount (INR)
+7. Amount (USD)
+8. Mode of Transaction ("rishi paid for it", "rupali paid for it", "paid via company account")
+9. Receipt URL (Google Drive link)
+
+**Code:**
 ```ruby
-# In SheetUpdateJob
-require 'google/apis/sheets_v4'
+# Uses same OAuth2 refresh token authentication as Drive
+row = [
+  data['date'],
+  data['particulars'],
+  data['type'],
+  data['classification'],
+  data['description'],
+  data['amount_inr'],
+  data['amount_usd'],
+  data['mode_of_transaction'],
+  invoice.google_drive_url
+]
 
-def append_to_google_sheet(invoice)
-  service = Google::Apis::SheetsV4::SheetsService.new
-  service.authorization = get_credentials
-
-  # Prepare row data
-  row = [
-    invoice.extracted_data['date'],
-    invoice.extracted_data['vendor_name'],
-    invoice.extracted_data['invoice_number'],
-    invoice.extracted_data['total_amount'],
-    invoice.extracted_data['tax_amount'],
-    invoice.extracted_data['currency'],
-    invoice.google_drive_url,
-    Time.current.to_s
-  ]
-
-  # Append to sheet
-  range = "#{sheet_tab_name}!A:H"
-  value_range = Google::Apis::SheetsV4::ValueRange.new(values: [row])
-  result = service.append_spreadsheet_value(
-    sheet_id,
-    range,
-    value_range,
-    value_input_option: 'USER_ENTERED'
-  )
-
-  result.updates.updated_range.split('!')[1].split(':')[0].scan(/\d+/)[0].to_i
-end
+range = 'Sheet1!A:I'
+value_range = Google::Apis::SheetsV4::ValueRange.new(values: [row])
+result = service.append_spreadsheet_value(
+  sheet_id,
+  range,
+  value_range,
+  value_input_option: 'USER_ENTERED'
+)
 ```
+
+**Returns:**
+- Row number where data was appended
+- Direct URL to the row in Google Sheets
 
 ---
 
 ## Running Jobs
 
-### Start Background Worker
+### Background Jobs (Only Drive & Sheets Upload)
 
+**Important:** Parsing is NO LONGER a background job! It happens synchronously in the controller.
+
+**Background jobs:**
+- `DriveUploadJob` - Uploads to Google Drive
+- `SheetUpdateJob` - Appends to Google Sheets
+
+**Start Background Worker:**
 ```bash
-bin/jobs
+bin/jobs  # Development
+RAILS_ENV=production bin/jobs  # Production
 ```
 
 **What it does:**
 - Polls Solid Queue database for pending jobs
 - Executes jobs in separate threads
 - Auto-retries failed jobs (3 attempts)
-- Logs to `log/development.log`
+- Logs to `log/production.log`
 
 **Important:**
 - Must restart after code changes (doesn't auto-reload like Rails server)
@@ -306,11 +483,12 @@ bin/jobs
 
 ```bash
 # Run job synchronously (for debugging)
-bin/rails runner "ImageParsingJob.perform_now(invoice_id)"
+bin/rails runner "DriveUploadJob.perform_now(invoice_id)"
+bin/rails runner "SheetUpdateJob.perform_now(invoice_id)"
 
 # Check job status
 bin/rails runner "
-  SolidQueue::Job.where(class_name: 'ImageParsingJob').each do |job|
+  SolidQueue::Job.where(class_name: 'DriveUploadJob').each do |job|
     puts \"Job ##{job.id}: #{job.finished_at ? 'Completed' : 'Pending'}\"
   end
 "
@@ -321,6 +499,38 @@ bin/rails runner "
     puts \"#{f.job.class_name}: #{f.error['message']}\"
   end
 "
+```
+
+---
+
+## Deployment
+
+### Production Deployment Script
+
+Use the included `deploy.sh` script for easy deployment:
+
+```bash
+# On production server
+cd /path/to/invoicemanager
+./deploy.sh
+```
+
+**What it does:**
+1. Pulls latest code from main branch (`git pull origin main`)
+2. Installs dependencies (`bundle install`)
+3. Runs database migrations (`db:migrate`)
+4. Restarts Puma and Solid Queue workers (`systemctl restart puma solid-queue`)
+
+**Prerequisites:**
+- Git repository set up on server
+- Puma and Solid Queue configured as systemd services
+- Sudo access for restarting services
+
+**Force Push Recovery:**
+If you force-pushed to main and get divergent branches error:
+```bash
+git fetch origin main
+git reset --hard origin/main
 ```
 
 ---
@@ -446,6 +656,48 @@ invoice.error_message  # => nil if successful
 bin/rails db:schema:load:queue
 ```
 
+### Google OAuth Authentication Errors
+
+**Problem:** `invalid_grant` or "Token has been expired or revoked"
+
+**Solutions:**
+1. **Re-authorize locally:**
+   ```bash
+   rm tmp/google_tokens.yaml  # Delete old token
+   bin/rails google:authorize  # Get new refresh token
+   ```
+
+2. **Copy refresh token to production:**
+   ```bash
+   # Get token from local credentials
+   bin/rails runner "puts Rails.application.credentials.dig(:google_oauth, :refresh_token)"
+
+   # On production, edit credentials and paste the token
+   EDITOR="nano" bin/rails credentials:edit --environment production
+   ```
+
+3. **Check credentials structure:**
+   ```yaml
+   google_oauth:
+     client_id: ...
+     client_secret: ...
+     refresh_token: ...  # Must be present!
+   ```
+
+**Problem:** Production can't authorize (no browser)
+
+**Solution:** Always authorize locally and copy the entire `google_oauth` section to production credentials. Never try to run `bin/rails google:authorize` on production.
+
+### Force Push Issues
+
+**Problem:** `divergent branches` after force push
+
+**Solution:**
+```bash
+git fetch origin main
+git reset --hard origin/main
+```
+
 ---
 
 ## Logs and Monitoring
@@ -489,57 +741,79 @@ bin/rails runner "
 ### Secrets Management
 
 **Stored in Rails Encrypted Credentials:**
-- `anthropic_api_key` - Anthropic API key (sk-ant-api03-...)
-- `google_credentials` - Google Service Account JSON (TODO)
-- Master key in: `config/master.key` (NOT in git)
+```yaml
+anthropic_api_key: sk-ant-api03-...
+
+google_oauth:
+  client_id: XXX.apps.googleusercontent.com
+  client_secret: GOCSPX-...
+  project_id: invoicemanagement-XXX
+  refresh_token: 1//0g...  # Never expires
+
+google_drive_folder_id: 1ABC...
+google_sheet_id: 1XYZ...
+```
+
+**Master key:** `config/master.key` (NOT in git, required to decrypt)
 
 **Edit Credentials:**
 ```bash
+# Development
 EDITOR="nano" bin/rails credentials:edit
+
+# Production
+EDITOR="nano" bin/rails credentials:edit --environment production
 ```
+
+**Authorization:**
+- Run `bin/rails google:authorize` once locally
+- Refresh token is saved to credentials automatically
+- Copy entire `google_oauth` section to production credentials
+- No need to authorize on production server (can't open browser there)
 
 ### .gitignore Protection
 
-**Already ignored:**
-- `config/master.key`
-- `config/*.key`
-- `.env*`
+**Never commit:**
+- `config/master.key` ⚠️
+- `config/credentials/production.key` ⚠️
+- `config/*.key` ⚠️
+- `.env*` ⚠️
 - `storage/*` (uploaded images)
 - `tmp/*`
 - `log/*`
 
 **Safe to commit:**
-- `config/credentials.yml.enc` (encrypted)
-- All code files (use Rails.application.credentials)
+- `config/credentials.yml.enc` ✅ (encrypted)
+- `config/credentials/production.yml.enc` ✅ (encrypted)
+- All code files (use `Rails.application.credentials`)
 
 ---
 
 ## Current Status
 
-### ✅ Implemented
+### ✅ Fully Implemented & Working
 - Rails 8 app with PostgreSQL
 - Active Storage for image uploads
 - Solid Queue background jobs
 - Invoice model with detailed status tracking
-- ImageParsingJob with Claude API integration
-- HEIC to JPEG automatic conversion
-- Job chain architecture (3 jobs)
-- Web UI for uploads
+- **InvoiceParser service** - Synchronous AI parsing with Claude API
+- HEIC to JPEG automatic conversion with compression
+- **Review/Edit flow** - User can correct AI-extracted data before upload
+- **Google Drive API** - Uploads images to Drive with OAuth2
+- **Google Sheets API** - Appends data to Sheet with OAuth2
+- Web UI with upload and review pages
 - Status tracking per step
+- Business rules for automatic classification
+- Deployment script (`deploy.sh`)
 
-### 🚧 In Progress (Stubs)
-- DriveUploadJob - Returns mock URL
-- SheetUpdateJob - Logs mock data
-
-### 📋 TODO
-1. Implement Google Drive API in DriveUploadJob
-2. Implement Google Sheets API in SheetUpdateJob
-3. Add Google Service Account credentials
-4. Configure Drive folder ID and Sheet ID
-5. Define Sheet column structure
-6. Add user dashboard to view processed invoices (optional)
-7. Add retry/reprocess UI (optional)
-8. Add invoice viewing page (optional)
+### 📋 Optional Future Enhancements
+1. User dashboard to view processed invoices
+2. Retry/reprocess UI for failed invoices
+3. Search and filter invoices
+4. Bulk upload support
+5. Export to CSV/Excel
+6. User authentication (currently single-user system)
+7. Multi-user support with permissions
 
 ---
 
