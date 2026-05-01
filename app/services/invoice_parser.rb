@@ -108,8 +108,11 @@ class InvoiceParser
     # Extract text from response (response is an Anthropic::Models::Message object)
     text_content = response.content[0].text
 
+    # Strip markdown code fences if present (e.g. ```json ... ```)
+    clean_text = text_content.gsub(/\A```(?:json)?\s*/, '').gsub(/\s*```\z/, '').strip
+
     # Parse JSON response
-    extracted_data = JSON.parse(text_content)
+    extracted_data = JSON.parse(clean_text)
 
     # Convert LLM-extracted date to D-MMM-YYYY format (e.g., 1-Apr-2025)
     if extracted_data["date"].present?
@@ -165,7 +168,7 @@ class InvoiceParser
     extracted_data
   rescue JSON::ParserError => e
     Rails.logger.error "Failed to parse JSON response: #{e.message}"
-    Rails.logger.error "Response was: #{text_content}"
+    Rails.logger.error "Response was: #{clean_text || text_content}"
     raise "LLM returned invalid JSON: #{e.message}"
   rescue StandardError => e
     Rails.logger.error "Failed to parse invoice: #{e.message}"
